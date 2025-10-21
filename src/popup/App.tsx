@@ -1,5 +1,185 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
+
+interface Point {
+  x: number;
+  y: number;
+  oldX: number;
+  oldY: number;
+  pinned: boolean;
+}
+
+function PhysicsCable({ sliderValue, min, max }: { sliderValue: number; min: number; max: number }) {
+  const canvasRef = useRef<SVGSVGElement>(null);
+  const pointsRef = useRef<Point[]>([]);
+  const animationRef = useRef<number>();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Cable settings
+  const segmentCount = 25;
+  const gravity = 0.2;
+  const friction = 0.9;
+
+  useEffect(() => {
+    // Initialize cable points
+    if (pointsRef.current.length === 0) {
+      const points: Point[] = [];
+      for (let i = 0; i < segmentCount; i++) {
+        points.push({
+          x: 0,
+          y: 0,
+          oldX: 0,
+          oldY: 0,
+          pinned: i === 0 // First point is pinned
+        });
+      }
+      pointsRef.current = points;
+    }
+
+    // Animation loop
+    const animate = () => {
+      if (!containerRef.current) return;
+
+      const container = containerRef.current;
+      const rect = container.getBoundingClientRect();
+      const width = rect.width;
+
+      // Calculate slider thumb position
+      const normalizedValue = (sliderValue - min) / (max - min);
+      const sliderX = normalizedValue * width;
+      const sliderY = 38; // Approximate vertical position of slider
+
+      const points = pointsRef.current;
+
+      // Update physics
+      for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+
+        if (point.pinned) {
+          // First point stays at left edge
+          point.x = -10;
+          point.y = sliderY;
+          point.oldX = point.x;
+          point.oldY = point.y;
+          continue;
+        }
+
+        // Verlet integration
+        const vx = (point.x - point.oldX) * friction;
+        const vy = (point.y - point.oldY) * friction;
+
+        point.oldX = point.x;
+        point.oldY = point.y;
+
+        point.x += vx;
+        point.y += vy + gravity;
+
+        // Last point follows slider thumb
+        if (i === points.length - 1) {
+          point.x = sliderX;
+          point.y = sliderY;
+        }
+      }
+
+      // Apply constraints (keep segments connected)
+      const segmentLength = 8;
+      for (let iter = 0; iter < 3; iter++) {
+        for (let i = 0; i < points.length - 1; i++) {
+          const p1 = points[i];
+          const p2 = points[i + 1];
+
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const difference = segmentLength - distance;
+          const percent = difference / distance / 2;
+
+          const offsetX = dx * percent;
+          const offsetY = dy * percent;
+
+          if (!p1.pinned) {
+            p1.x -= offsetX;
+            p1.y -= offsetY;
+          }
+          if (!p2.pinned && i !== points.length - 2) {
+            p2.x += offsetX;
+            p2.y += offsetY;
+          }
+        }
+      }
+
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animate();
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [sliderValue, min, max]);
+
+  // Generate SVG path from points
+  const generatePath = () => {
+    const points = pointsRef.current;
+    if (points.length === 0) return '';
+
+    let path = `M ${points[0].x} ${points[0].y}`;
+    
+    // Smooth curve through points using quadratic bezier
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i];
+      if (i === 1) {
+        path += ` L ${p.x} ${p.y}`;
+      } else {
+        const prev = points[i - 1];
+        const cx = (prev.x + p.x) / 2;
+        const cy = (prev.y + p.y) / 2;
+        path += ` Q ${prev.x} ${prev.y} ${cx} ${cy}`;
+      }
+    }
+    
+    // Final point
+    const last = points[points.length - 1];
+    path += ` L ${last.x} ${last.y}`;
+
+    return path;
+  };
+
+  return (
+    <div ref={containerRef} className="cable-container">
+      <svg ref={canvasRef}>
+        <path
+          d={generatePath()}
+          fill="none"
+          stroke="rgba(200, 200, 200, 0.8)"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          filter="drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6))"
+        />
+        {/* Cable connector plug at slider end */}
+        <circle
+          cx={pointsRef.current[pointsRef.current.length - 1]?.x || 0}
+          cy={pointsRef.current[pointsRef.current.length - 1]?.y || 0}
+          r="4"
+          fill="rgba(180, 180, 180, 0.9)"
+          stroke="rgba(100, 100, 100, 0.8)"
+          strokeWidth="1"
+        />
+        {/* Cable jack at left end */}
+        <circle
+          cx={pointsRef.current[0]?.x || 0}
+          cy={pointsRef.current[0]?.y || 0}
+          r="5"
+          fill="rgba(150, 150, 150, 0.9)"
+          stroke="rgba(80, 80, 80, 0.8)"
+          strokeWidth="1.5"
+        />
+      </svg>
+    </div>
+  );
+}
 
 function App() {
   const [pitch, setPitch] = useState(0);
@@ -125,7 +305,7 @@ function App() {
 
   return (
     <div className="container">
-      <h1>soundgoodizer</h1>
+      <h1>soundgoody</h1>
       
       <div className={`status ${isConnected ? 'connected' : 'disconnected'}`}>
         {status}
@@ -133,6 +313,27 @@ function App() {
 
       <div className="controls">
         <div className="control-group">
+          <label htmlFor="pitch">
+            Pitch: <strong>{pitch > 0 ? `+${pitch}` : pitch}</strong> semitones
+          </label>
+          <input
+            type="range"
+            id="pitch"
+            min="-12"
+            max="12"
+            value={pitch}
+            onChange={handlePitchChange}
+            disabled={!isConnected}
+          />
+          <div className="range-markers">
+            <span>-12</span>
+            <span>0</span>
+            <span>+12</span>
+          </div>
+        </div>
+
+        <div className="control-group">
+          <PhysicsCable sliderValue={speed} min={0.5} max={2} />
           <label htmlFor="speed">
             Speed: <strong>{speed.toFixed(2)}x</strong>
           </label>
@@ -158,9 +359,10 @@ function App() {
           disabled={!isConnected}
           className="reset-button"
         >
-          reset
+          Reset All
         </button>
       </div>
+
     </div>
   );
 }

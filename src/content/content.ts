@@ -9,9 +9,7 @@ class SpotifyAudioManipulator {
   private currentSpeed: number = 1.0;
   private currentPreservesPitch: boolean = true;
 
-  constructor() {
-    console.log('🎵 SpotifyAudioManipulator initialized (content script)');
-    
+  constructor() {    
     // Inject the page context script immediately
     this.injectPageScript();
   }
@@ -22,20 +20,16 @@ class SpotifyAudioManipulator {
   private injectPageScript(): void {
     const script = document.createElement('script');
     
-    // Load inject.js from the root of the extension
     script.src = chrome.runtime.getURL('inject.js');
     script.type = 'text/javascript';
     
-    // Inject at the very start of <head> to run before Spotify's scripts
+    // Inject at the very start of <head> to run before Spotify
     const target = document.head || document.documentElement;
     target.insertBefore(script, target.firstChild);
     
-    console.log('💉 Injected page script from:', script.src);
     
-    // Remove script tag after injection to clean up DOM
     script.onload = () => {
       script.remove();
-      console.log('🧹 Script tag removed after load');
     };
   }
 
@@ -84,7 +78,6 @@ class SpotifyAudioManipulator {
    * Initialize - Wait for page script to be ready
    */
   async init(): Promise<boolean> {
-    console.log('Initializing...');
     
     // Wait for page script to be ready (inject.js running in page world)
     let attempts = 0;
@@ -105,14 +98,11 @@ class SpotifyAudioManipulator {
       console.error('Make sure inject.js loaded successfully');
       return false;
     }
-    
-    console.log('✅ Page script ready');
-    
+        
     // Check if Spotify has already created media elements
     const response = await this.sendPageCommand('checkMediaElement');
     
     if (response && response.hasMediaElement) {
-      console.log('Media element found immediately');
       return true;
     }
     
@@ -121,12 +111,11 @@ class SpotifyAudioManipulator {
     const found = await this.waitForMediaElement();
     
     if (found) {
-      console.log('✅ Ready to control playback');
+      console.log('Ready to control playback');
       return true;
     }
     
-    console.error('❌ No media element found');
-    console.log('💡 Try playing a song first');
+    console.error('No media element found');
     return false;
   }
 
@@ -141,7 +130,7 @@ class SpotifyAudioManipulator {
       const response = await this.sendPageCommand('checkMediaElement');
       
       if (response && response.hasMediaElement) {
-        console.log(`✅ Media element found after ${(attempts * 0.5).toFixed(1)}s`);
+        console.log(`Media element found after ${(attempts * 0.5).toFixed(1)}s`);
         return true;
       }
       
@@ -149,7 +138,7 @@ class SpotifyAudioManipulator {
       attempts++;
     }
     
-    console.error('❌ Timeout: No media element found after 20s');
+    console.error('Timeout: No media element found after 20s');
     return false;
   }
 
@@ -158,11 +147,6 @@ class SpotifyAudioManipulator {
    */
   async setPitch(semitones: number): Promise<void> {
     this.currentPitch = semitones;
-    
-    // Pitch shifting requires Web Audio API processing
-    // This would need additional implementation with a pitch shift library
-    console.log(`Pitch set to ${semitones} semitones (not yet implemented)`);
-    console.log('For pitch shifting, we need to route audio through Web Audio API');
     
     // For now, we can adjust preserve pitch based on whether we're shifting
     if (semitones !== 0) {
@@ -182,9 +166,9 @@ class SpotifyAudioManipulator {
     
     try {
       await this.sendPageCommand('setSpeed', speed);
-      console.log(`✅ Speed set to ${speed.toFixed(2)}x`);
+      console.log(`Speed set to ${speed.toFixed(2)}x`);
     } catch (error) {
-      console.error('❌ Failed to set speed:', error);
+      console.error('Failed to set speed:', error);
     }
   }
 
@@ -196,9 +180,9 @@ class SpotifyAudioManipulator {
     
     try {
       await this.sendPageCommand('setPreservesPitch', preserve);
-      console.log(`✅ Preserve pitch: ${preserve}`);
+      console.log(`Preserve pitch: ${preserve}`);
     } catch (error) {
-      console.error('❌ Failed to set preserves pitch:', error);
+      console.error('Failed to set preserves pitch:', error);
     }
   }
 
@@ -220,7 +204,7 @@ const manipulator = new SpotifyAudioManipulator();
  * Listen for messages from the popup
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('📨 Message received:', request.action);
+  console.log('Message received:', request.action);
 
   switch (request.action) {
     case 'init':
@@ -251,5 +235,3 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: false, error: 'Unknown action' });
   }
 });
-
-console.log('Spotify Pitch Shifter - Content script loaded');

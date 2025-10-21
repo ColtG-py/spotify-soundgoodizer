@@ -1,8 +1,6 @@
 (function() {
   'use strict';
   
-  console.log('🎵 Spotify Pitch Shifter - Page context script loaded');
-
   // Store references to all video/audio elements created by Spotify
   var spotifyPlaybackEls = [];
 
@@ -33,7 +31,7 @@
           playbackRateDescriptor.set.call(this, value.value);
         } else {
           // Otherwise, it's Spotify trying to reset - block it and use our speed
-          console.log('🛡️ Blocked Spotify playback rate reset, maintaining:', currentSpeed);
+          console.log('Blocked Spotify playback rate reset, maintaining:', currentSpeed);
           playbackRateDescriptor.set.call(this, currentSpeed);
         }
       },
@@ -55,7 +53,6 @@
     
     // If Spotify creates a video or audio element, capture it
     if (tagName.toLowerCase() === 'video' || tagName.toLowerCase() === 'audio') {
-      console.log('Intercepted ' + tagName + ' element creation!');
       
       spotifyPlaybackEls.push(element);
       
@@ -158,5 +155,4 @@
     }
   });
 
-  console.log('Spotify audio interception ready! __spotifyPitchShifter exposed to window');
 })();
