@@ -1,105 +1,121 @@
 /**
- * Content Script - Runs in the context of the Spotify web player
- * Injects a script to intercept Spotify's video element creation
+ * Content Script - Runs in ISOLATED world (content script context)
+ * Injects inject.js from web_accessible_resources into page context
  */
 
 class SpotifyAudioManipulator {
   private currentPitch: number = 0;
   private currentSpeed: number = 1.0;
-  private mediaElement: HTMLMediaElement | null = null;
+  private currentPreservesPitch: boolean = true;
 
   constructor() {
-    // Inject our script into the page context ASAP
-    this.injectScript();
+    console.log('🎵 SpotifyAudioManipulator initialized (content script)');
     
-    // Listen for when Spotify creates media elements
-    window.addEventListener('spotifyMediaElementCreated', ((e: CustomEvent) => {
-      console.log('📺 Spotify created a media element:', e.detail.type);
-      this.mediaElement = e.detail.element;
-    }) as EventListener);
+    // Inject the page context script immediately
+    this.injectPageScript();
   }
 
   /**
-   * Inject script into page context to intercept createElement
+   * Inject the page context script from web_accessible_resources
    */
-  private injectScript(): void {
+  private injectPageScript(): void {
     const script = document.createElement('script');
-    script.textContent = `
-      (function() {
-        console.log('🎵 Spotify Pitch Shifter - Inject script loaded');
-
-        const mediaElements = [];
-        const originalCreateElement = document.createElement.bind(document);
-        
-        document.createElement = function(tagName, options) {
-          const element = originalCreateElement(tagName, options);
-          
-          if (tagName.toLowerCase() === 'video' || tagName.toLowerCase() === 'audio') {
-            console.log('✅ Intercepted ' + tagName + ' element creation!');
-            mediaElements.push(element);
-            window.__spotifyMediaElements = mediaElements;
-            
-            window.dispatchEvent(new CustomEvent('spotifyMediaElementCreated', {
-              detail: { element, type: tagName }
-            }));
-          }
-          
-          return element;
-        };
-        
-        window.getSpotifyMediaElement = function() {
-          for (let i = mediaElements.length - 1; i >= 0; i--) {
-            const el = mediaElements[i];
-            if (el && !el.paused && el.readyState >= 2) {
-              return el;
-            }
-          }
-          return mediaElements[mediaElements.length - 1] || null;
-        };
-        
-        console.log('🔧 document.createElement has been intercepted');
-      })();
-    `;
     
-    // Inject at the start of <head> or <html> to run before Spotify's scripts
-    (document.head || document.documentElement).prepend(script);
-    console.log('💉 Injected interception script');
+    // Load the script from web_accessible_resources
+    // The build system should output inject.js to the correct location
+    script.src = chrome.runtime.getURL('src/content/inject.js');
+    script.type = 'text/javascript';
+    
+    // Inject at the very start of <head> to run before Spotify's scripts
+    const target = document.head || document.documentElement;
+    target.insertBefore(script, target.firstChild);
+    
+    console.log('💉 Injected page script from:', script.src);
+    
+    // Remove script tag after injection to clean up DOM
+    script.onload = () => {
+      script.remove();
+      console.log('🧹 Script tag removed after load');
+    };
   }
 
   /**
-   * Initialize - Get reference to media element
+   * Check if the page context script is ready
+   */
+  private isPageScriptReady(): boolean {
+    return typeof (window as any).__spotifyPitchShifter !== 'undefined';
+  }
+
+  /**
+   * Initialize - Wait for page script to be ready
    */
   async init(): Promise<boolean> {
     console.log('🔍 Initializing...');
     
-    // Try to get existing media element
-    this.mediaElement = this.getMediaElement();
+    // Wait for page script to be ready (inject.ts running in MAIN world)
+    let attempts = 0;
+    const maxAttempts = 50; // 5 seconds
     
-    if (this.mediaElement) {
-      console.log('✅ Found existing media element');
+    while (!this.isPageScriptReady() && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      attempts++;
+    }
+    
+    if (!this.isPageScriptReady()) {
+      console.error('❌ Page script (__spotifyPitchShifter) not found');
+      console.error('💡 Make sure inject.ts is loaded with world: MAIN in manifest');
+      return false;
+    }
+    
+    console.log('✅ Page script ready');
+    
+    // Check if Spotify has already created media elements
+    const mediaElement = (window as any).__spotifyPitchShifter.getMediaElement();
+    
+    if (mediaElement) {
+      console.log('✅ Media element found immediately');
       return true;
     }
     
-    // Wait for Spotify to create the media element
-    console.log('⏳ Waiting for Spotify to create media element...');
+    // Wait for Spotify to create media elements
+    console.log('⏳ Waiting for Spotify to create media elements...');
+    const found = await this.waitForMediaElement();
+    
+    if (found) {
+      console.log('✅ Ready to control playback');
+      return true;
+    }
+    
+    console.error('❌ No media element found');
+    console.log('💡 Try playing a song first');
+    return false;
+  }
+
+  /**
+   * Wait for Spotify to create a media element
+   */
+  private async waitForMediaElement(): Promise<boolean> {
     return new Promise((resolve) => {
       let attempts = 0;
       const maxAttempts = 40; // 20 seconds
       
       const checkInterval = setInterval(() => {
-        this.mediaElement = this.getMediaElement();
-        
-        if (this.mediaElement) {
-          console.log(`✅ Media element found after ${attempts * 0.5}s`);
-          clearInterval(checkInterval);
-          resolve(true);
-          return;
+        try {
+          const element = (window as any).__spotifyPitchShifter?.getMediaElement();
+          
+          if (element) {
+            console.log(`✅ Media element found after ${(attempts * 0.5).toFixed(1)}s`);
+            clearInterval(checkInterval);
+            resolve(true);
+            return;
+          }
+        } catch (error) {
+          console.error('Error checking for media element:', error);
         }
         
         attempts++;
         if (attempts >= maxAttempts) {
-          console.error('❌ Timeout: No media element found');
-          console.log('💡 Try playing a song, then refresh and try again');
+          console.error('❌ Timeout: No media element found after 20s');
           clearInterval(checkInterval);
           resolve(false);
         }
@@ -108,28 +124,24 @@ class SpotifyAudioManipulator {
   }
 
   /**
-   * Get media element from page context
-   */
-  private getMediaElement(): HTMLMediaElement | null {
-    try {
-      // Call the function we injected into page context
-      const element = (window as any).getSpotifyMediaElement?.();
-      return element || null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  /**
-   * Set pitch shift in semitones
+   * Set pitch shift in semitones (for future implementation)
    */
   setPitch(semitones: number): void {
     this.currentPitch = semitones;
-    const pitchRatio = Math.pow(2, semitones / 12);
-    console.log(`🎵 Pitch set to ${semitones} semitones (ratio: ${pitchRatio.toFixed(3)})`);
     
-    // TODO: Implement actual pitch shifting with a library
-    // For now, this is just logged
+    // Pitch shifting requires Web Audio API processing
+    // This would need additional implementation with a pitch shift library
+    console.log(`🎵 Pitch set to ${semitones} semitones (not yet implemented)`);
+    console.log('💡 For pitch shifting, you would need to route audio through Web Audio API');
+    
+    // For now, we can adjust preserve pitch based on whether we're shifting
+    if (semitones !== 0) {
+      // When pitch shifting is desired but not implemented, 
+      // disable preserve pitch to at least change the tone
+      this.setPreservesPitch(false);
+    } else {
+      this.setPreservesPitch(true);
+    }
   }
 
   /**
@@ -138,18 +150,31 @@ class SpotifyAudioManipulator {
   setSpeed(speed: number): void {
     this.currentSpeed = speed;
     
-    // Get fresh reference in case it changed
-    const element = this.getMediaElement();
-    
-    if (element) {
-      try {
-        element.playbackRate = speed;
+    try {
+      if (this.isPageScriptReady()) {
+        (window as any).__spotifyPitchShifter.setSpeed(speed);
         console.log(`✅ Speed set to ${speed.toFixed(2)}x`);
-      } catch (error) {
-        console.error('❌ Failed to set playback rate:', error);
+      } else {
+        console.error('❌ Page script not ready');
       }
-    } else {
-      console.error('❌ No media element available');
+    } catch (error) {
+      console.error('❌ Failed to set speed:', error);
+    }
+  }
+
+  /**
+   * Set preserves pitch
+   */
+  setPreservesPitch(preserve: boolean): void {
+    this.currentPreservesPitch = preserve;
+    
+    try {
+      if (this.isPageScriptReady()) {
+        (window as any).__spotifyPitchShifter.setPreservesPitch(preserve);
+        console.log(`✅ Preserve pitch: ${preserve}`);
+      }
+    } catch (error) {
+      console.error('❌ Failed to set preserves pitch:', error);
     }
   }
 
