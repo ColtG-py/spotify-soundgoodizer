@@ -39,7 +39,7 @@
   },
   
   "web_accessible_resources": [{
-    "resources": ["src/content/inject.js"],
+    "resources": ["inject.js"],
     "matches": ["https://open.spotify.com/*"]
   }]
 }

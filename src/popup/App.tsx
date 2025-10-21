@@ -125,33 +125,13 @@ function App() {
 
   return (
     <div className="container">
-      <h1>🎵 Spotify Pitch Shifter</h1>
+      <h1>soundgoodizer</h1>
       
       <div className={`status ${isConnected ? 'connected' : 'disconnected'}`}>
         {status}
       </div>
 
       <div className="controls">
-        <div className="control-group">
-          <label htmlFor="pitch">
-            Pitch: <strong>{pitch > 0 ? `+${pitch}` : pitch}</strong> semitones
-          </label>
-          <input
-            type="range"
-            id="pitch"
-            min="-12"
-            max="12"
-            value={pitch}
-            onChange={handlePitchChange}
-            disabled={!isConnected}
-          />
-          <div className="range-markers">
-            <span>-12</span>
-            <span>0</span>
-            <span>+12</span>
-          </div>
-        </div>
-
         <div className="control-group">
           <label htmlFor="speed">
             Speed: <strong>{speed.toFixed(2)}x</strong>
@@ -178,13 +158,8 @@ function App() {
           disabled={!isConnected}
           className="reset-button"
         >
-          Reset All
+          reset
         </button>
-      </div>
-
-      <div className="info">
-        <p>🎸 Perfect for musicians learning songs</p>
-        <p>📚 Practice at your own pace</p>
       </div>
     </div>
   );

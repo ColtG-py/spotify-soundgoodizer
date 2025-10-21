@@ -17,7 +17,7 @@ body {
   padding: 20px;
   background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
   color: white;
-  min-height: 400px;
+  min-height: 200px;
 }
 
 h1 {

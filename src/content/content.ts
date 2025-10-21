@@ -1,6 +1,7 @@
 /**
  * Content Script - Runs in ISOLATED world (content script context)
  * Injects inject.js from web_accessible_resources into page context
+ * Communicates with page context via DOM manipulation
  */
 
 class SpotifyAudioManipulator {
@@ -21,9 +22,8 @@ class SpotifyAudioManipulator {
   private injectPageScript(): void {
     const script = document.createElement('script');
     
-    // Load the script from web_accessible_resources
-    // The build system should output inject.js to the correct location
-    script.src = chrome.runtime.getURL('src/content/inject.js');
+    // Load inject.js from the root of the extension
+    script.src = chrome.runtime.getURL('inject.js');
     script.type = 'text/javascript';
     
     // Inject at the very start of <head> to run before Spotify's scripts
@@ -40,45 +40,84 @@ class SpotifyAudioManipulator {
   }
 
   /**
+   * Send a command to the page context via CustomEvent
+   * Returns a promise that resolves with the response
+   */
+  private async sendPageCommand(command: string, value?: any): Promise<any> {
+    return new Promise((resolve) => {
+      // Set up one-time listener for response
+      const responseHandler = (event: Event) => {
+        const customEvent = event as CustomEvent;
+        document.removeEventListener('spotify-pitch-shifter-response', responseHandler);
+        resolve(customEvent.detail);
+      };
+      
+      document.addEventListener('spotify-pitch-shifter-response', responseHandler);
+      
+      // Dispatch command
+      document.dispatchEvent(new CustomEvent('spotify-pitch-shifter-command', {
+        detail: { command, value }
+      }));
+      
+      // Timeout after 1 second
+      setTimeout(() => {
+        document.removeEventListener('spotify-pitch-shifter-response', responseHandler);
+        resolve(null);
+      }, 1000);
+    });
+  }
+
+  /**
    * Check if the page context script is ready
    */
-  private isPageScriptReady(): boolean {
-    return typeof (window as any).__spotifyPitchShifter !== 'undefined';
+  private async isPageScriptReady(): Promise<boolean> {
+    try {
+      const response = await this.sendPageCommand('checkReady');
+      return response && response.ready === true;
+    } catch (error) {
+      console.error('Error checking page script:', error);
+      return false;
+    }
   }
 
   /**
    * Initialize - Wait for page script to be ready
    */
   async init(): Promise<boolean> {
-    console.log('🔍 Initializing...');
+    console.log('Initializing...');
     
-    // Wait for page script to be ready (inject.ts running in MAIN world)
+    // Wait for page script to be ready (inject.js running in page world)
     let attempts = 0;
     const maxAttempts = 50; // 5 seconds
     
-    while (!this.isPageScriptReady() && attempts < maxAttempts) {
+    while (attempts < maxAttempts) {
+      const isReady = await this.isPageScriptReady();
+      if (isReady) {
+        break;
+      }
       await new Promise(resolve => setTimeout(resolve, 100));
       attempts++;
     }
     
-    if (!this.isPageScriptReady()) {
-      console.error('❌ Page script (__spotifyPitchShifter) not found');
-      console.error('💡 Make sure inject.ts is loaded with world: MAIN in manifest');
+    const finalCheck = await this.isPageScriptReady();
+    if (!finalCheck) {
+      console.error('Page script (__spotifyPitchShifter) not found');
+      console.error('Make sure inject.js loaded successfully');
       return false;
     }
     
     console.log('✅ Page script ready');
     
     // Check if Spotify has already created media elements
-    const mediaElement = (window as any).__spotifyPitchShifter.getMediaElement();
+    const response = await this.sendPageCommand('checkMediaElement');
     
-    if (mediaElement) {
-      console.log('✅ Media element found immediately');
+    if (response && response.hasMediaElement) {
+      console.log('Media element found immediately');
       return true;
     }
     
     // Wait for Spotify to create media elements
-    console.log('⏳ Waiting for Spotify to create media elements...');
+    console.log('Waiting for Spotify to create media elements...');
     const found = await this.waitForMediaElement();
     
     if (found) {
@@ -95,68 +134,55 @@ class SpotifyAudioManipulator {
    * Wait for Spotify to create a media element
    */
   private async waitForMediaElement(): Promise<boolean> {
-    return new Promise((resolve) => {
-      let attempts = 0;
-      const maxAttempts = 40; // 20 seconds
+    let attempts = 0;
+    const maxAttempts = 40; // 20 seconds
+    
+    while (attempts < maxAttempts) {
+      const response = await this.sendPageCommand('checkMediaElement');
       
-      const checkInterval = setInterval(() => {
-        try {
-          const element = (window as any).__spotifyPitchShifter?.getMediaElement();
-          
-          if (element) {
-            console.log(`✅ Media element found after ${(attempts * 0.5).toFixed(1)}s`);
-            clearInterval(checkInterval);
-            resolve(true);
-            return;
-          }
-        } catch (error) {
-          console.error('Error checking for media element:', error);
-        }
-        
-        attempts++;
-        if (attempts >= maxAttempts) {
-          console.error('❌ Timeout: No media element found after 20s');
-          clearInterval(checkInterval);
-          resolve(false);
-        }
-      }, 500);
-    });
+      if (response && response.hasMediaElement) {
+        console.log(`✅ Media element found after ${(attempts * 0.5).toFixed(1)}s`);
+        return true;
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
+      attempts++;
+    }
+    
+    console.error('❌ Timeout: No media element found after 20s');
+    return false;
   }
 
   /**
    * Set pitch shift in semitones (for future implementation)
    */
-  setPitch(semitones: number): void {
+  async setPitch(semitones: number): Promise<void> {
     this.currentPitch = semitones;
     
     // Pitch shifting requires Web Audio API processing
     // This would need additional implementation with a pitch shift library
-    console.log(`🎵 Pitch set to ${semitones} semitones (not yet implemented)`);
-    console.log('💡 For pitch shifting, you would need to route audio through Web Audio API');
+    console.log(`Pitch set to ${semitones} semitones (not yet implemented)`);
+    console.log('For pitch shifting, we need to route audio through Web Audio API');
     
     // For now, we can adjust preserve pitch based on whether we're shifting
     if (semitones !== 0) {
       // When pitch shifting is desired but not implemented, 
       // disable preserve pitch to at least change the tone
-      this.setPreservesPitch(false);
+      await this.setPreservesPitch(false);
     } else {
-      this.setPreservesPitch(true);
+      await this.setPreservesPitch(true);
     }
   }
 
   /**
    * Set playback speed
    */
-  setSpeed(speed: number): void {
+  async setSpeed(speed: number): Promise<void> {
     this.currentSpeed = speed;
     
     try {
-      if (this.isPageScriptReady()) {
-        (window as any).__spotifyPitchShifter.setSpeed(speed);
-        console.log(`✅ Speed set to ${speed.toFixed(2)}x`);
-      } else {
-        console.error('❌ Page script not ready');
-      }
+      await this.sendPageCommand('setSpeed', speed);
+      console.log(`✅ Speed set to ${speed.toFixed(2)}x`);
     } catch (error) {
       console.error('❌ Failed to set speed:', error);
     }
@@ -165,14 +191,12 @@ class SpotifyAudioManipulator {
   /**
    * Set preserves pitch
    */
-  setPreservesPitch(preserve: boolean): void {
+  async setPreservesPitch(preserve: boolean): Promise<void> {
     this.currentPreservesPitch = preserve;
     
     try {
-      if (this.isPageScriptReady()) {
-        (window as any).__spotifyPitchShifter.setPreservesPitch(preserve);
-        console.log(`✅ Preserve pitch: ${preserve}`);
-      }
+      await this.sendPageCommand('setPreservesPitch', preserve);
+      console.log(`✅ Preserve pitch: ${preserve}`);
     } catch (error) {
       console.error('❌ Failed to set preserves pitch:', error);
     }
@@ -228,4 +252,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-console.log('🎵 Spotify Pitch Shifter - Content script loaded');
+console.log('Spotify Pitch Shifter - Content script loaded');
